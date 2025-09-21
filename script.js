@@ -1,6 +1,8 @@
 // Create floating particles
 function createParticles() {
     const container = document.getElementById('particles');
+    if (!container) return; // Safety check
+    
     const numParticles = 30;
     
     for (let i = 0; i < numParticles; i++) {
@@ -13,54 +15,106 @@ function createParticles() {
     }
 }
 
-// Initialize particles on page load
-createParticles();
-
 // API configuration
-const PROXY_URL = 'https://api.allorigins.win/raw?url=';
-const API_URL = PROXY_URL + encodeURIComponent('https://starmaker.id.vn/wp-admin/admin-ajax.php');
-const NONCE = '17684aaf53';
+const API_BASE_URL = 'https://starmaker.id.vn/wp-admin/admin-ajax.php';
 
-// Add this function to get a fresh nonce
+// Get fresh nonce from the API
 async function getFreshNonce() {
     try {
-        const response = await fetch('https://starmaker.id.vn/wp-admin/admin-ajax.php', {
+        const formData = new URLSearchParams();
+        formData.append('action', 'info_id_sm_get_nonce');
+        
+        const response = await fetch(API_BASE_URL, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
+                'Accept': 'application/json',
             },
-            body: 'action=info_id_sm_get_nonce'
+            body: formData
         });
         
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
         const data = await response.json();
+        console.log('Nonce response:', data);
+        
         return data.success ? data.data.nonce : '17684aaf53';
     } catch (error) {
-        return '17684aaf53'; // fallback
+        console.warn('Failed to get fresh nonce:', error);
+        return '17684aaf53'; // fallback nonce
     }
 }
 
-// Update fetchUserData to use fresh nonce
+// Fetch user data from StarMaker API
 async function fetchUserData(sid) {
-    const nonce = await getFreshNonce();
-    
-    const formData = new URLSearchParams();
-    formData.append('action', 'info_id_sm_fetch');
-    formData.append('sid', sid);
-    formData.append('nonce', nonce);
-    
-    const response = await fetch('https://starmaker.id.vn/wp-admin/admin-ajax.php', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: formData
-    });
-    
-    return await response.json();
+    try {
+        const nonce = await getFreshNonce();
+        console.log('Using nonce:', nonce);
+        
+        const formData = new URLSearchParams();
+        formData.append('action', 'info_id_sm_fetch');
+        formData.append('sid', sid);
+        formData.append('nonce', nonce);
+        
+        const response = await fetch(API_BASE_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Accept': 'application/json',
+            },
+            body: formData
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        console.log('User data response:', data);
+        
+        return data;
+    } catch (error) {
+        console.error('Error in fetchUserData:', error);
+        throw error;
+    }
+}
+
+// Alternative fetch method using CORS proxy if direct API fails
+async function fetchUserDataWithProxy(sid) {
+    try {
+        const PROXY_URL = 'https://cors-anywhere.herokuapp.com/';
+        const nonce = '17684aaf53'; // Use default nonce for proxy method
+        
+        const formData = new URLSearchParams();
+        formData.append('action', 'info_id_sm_fetch');
+        formData.append('sid', sid);
+        formData.append('nonce', nonce);
+        
+        const response = await fetch(PROXY_URL + API_BASE_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Accept': 'application/json',
+            },
+            body: formData
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        return await response.json();
+    } catch (error) {
+        console.error('Error with proxy method:', error);
+        throw error;
+    }
 }
 
 // Format timestamp to readable date
 function formatDate(timestamp) {
+    if (!timestamp) return 'Not available';
     const date = new Date(timestamp * 1000);
     return date.toLocaleDateString('en-US', {
         year: 'numeric',
@@ -72,6 +126,14 @@ function formatDate(timestamp) {
 // Format numbers with commas
 function formatNumber(num) {
     return num ? num.toLocaleString() : '0';
+}
+
+// Safe image URL handler
+function getSafeImageUrl(url, defaultUrl = 'https://via.placeholder.com/150x150?text=No+Image') {
+    if (!url || url.includes('placeholder')) {
+        return defaultUrl;
+    }
+    return url;
 }
 
 // Display user data in the UI
@@ -86,7 +148,10 @@ function displayUserData(data) {
             <div class="user-header">
                 <div class="profile-section">
                     <div style="position: relative;">
-                        <img src="${user.profile_image || '/api/placeholder/150/150'}" alt="Profile" class="profile-image" />
+                        <img src="${getSafeImageUrl(user.profile_image)}" 
+                             alt="Profile" 
+                             class="profile-image" 
+                             onerror="this.src='https://via.placeholder.com/150x150?text=No+Image'" />
                         ${user.is_vip_v2 ? '<div class="vip-badge">VIP</div>' : ''}
                     </div>
                 </div>
@@ -124,7 +189,10 @@ function displayUserData(data) {
                     <div class="verification-badges">
                         ${user.v_info.title.map(title => `
                             <div class="badge">
-                                <img src="${user.v_info.icon}" alt="Verification" class="badge-icon" />
+                                <img src="${getSafeImageUrl(user.v_info.icon)}" 
+                                     alt="Verification" 
+                                     class="badge-icon" 
+                                     onerror="this.style.display='none'" />
                                 <span>${title.text}</span>
                             </div>
                         `).join('')}
@@ -157,7 +225,9 @@ function displayUserData(data) {
                     
                     ${family.cover_url ? `
                         <div class="family-cover">
-                            <img src="${family.cover_url}" alt="Family Cover" />
+                            <img src="${getSafeImageUrl(family.cover_url)}" 
+                                 alt="Family Cover" 
+                                 onerror="this.style.display='none'" />
                         </div>
                     ` : ''}
                     
@@ -192,7 +262,7 @@ function displayUserData(data) {
                         </div>
                         <div class="info-item">
                             <span class="info-label">Region:</span>
-                            <span class="info-value">${family.region}</span>
+                            <span class="info-value">${family.region || 'Not specified'}</span>
                         </div>
                         <div class="info-item">
                             <span class="info-label">Created:</span>
@@ -208,7 +278,13 @@ function displayUserData(data) {
 // Show error message
 function showError(message) {
     const resultContainer = document.getElementById('result');
-    resultContainer.innerHTML = `<div class="error">${message}</div>`;
+    resultContainer.innerHTML = `
+        <div class="error">
+            <h3>Error</h3>
+            <p>${message}</p>
+            <small>If CORS errors occur, you may need to run this from a server or use a CORS proxy.</small>
+        </div>
+    `;
 }
 
 // Show/hide loading state
@@ -217,32 +293,50 @@ function showLoading(show) {
     const fetchBtn = document.getElementById('fetchBtn');
     
     if (show) {
-        loading.classList.remove('hidden');
-        fetchBtn.disabled = true;
-        fetchBtn.textContent = 'Loading...';
+        if (loading) loading.classList.remove('hidden');
+        if (fetchBtn) {
+            fetchBtn.disabled = true;
+            fetchBtn.textContent = 'Loading...';
+        }
     } else {
-        loading.classList.add('hidden');
-        fetchBtn.disabled = false;
-        fetchBtn.textContent = 'Fetch Info';
+        if (loading) loading.classList.add('hidden');
+        if (fetchBtn) {
+            fetchBtn.disabled = false;
+            fetchBtn.textContent = 'Fetch Info';
+        }
     }
+}
+
+// Validate SID input
+function validateSID(sid) {
+    if (!sid || sid.trim() === '') {
+        return { valid: false, message: 'Please enter a valid SID' };
+    }
+    
+    if (!/^\d+$/.test(sid.trim())) {
+        return { valid: false, message: 'SID must contain only numbers' };
+    }
+    
+    if (sid.trim().length < 5) {
+        return { valid: false, message: 'SID must be at least 5 digits long' };
+    }
+    
+    return { valid: true };
 }
 
 // Main function to handle fetching user data
 async function handleFetch() {
     const sidInput = document.getElementById('sidInput');
-    const sid = sidInput.value.trim();
+    const sid = sidInput?.value?.trim();
     
     // Clear previous results
-    document.getElementById('result').innerHTML = '';
+    const resultContainer = document.getElementById('result');
+    if (resultContainer) resultContainer.innerHTML = '';
     
     // Validate SID input
-    if (!sid) {
-        showError('Please enter a valid SID');
-        return;
-    }
-    
-    if (!/^\d+$/.test(sid)) {
-        showError('SID must contain only numbers');
+    const validation = validateSID(sid);
+    if (!validation.valid) {
+        showError(validation.message);
         return;
     }
     
@@ -250,42 +344,81 @@ async function handleFetch() {
     showLoading(true);
     
     try {
-        const data = await fetchUserData(sid);
-
-        // Add debugging
-        console.log('API Response:', data);
+        // Try direct API call first
+        let data;
+        try {
+            data = await fetchUserData(sid);
+        } catch (directError) {
+            console.warn('Direct API call failed, trying proxy method:', directError);
+            // Fallback to proxy method
+            data = await fetchUserDataWithProxy(sid);
+        }
+        
+        console.log('Final API Response:', data);
         
         if (data.success && data.data) {
             displayUserData(data.data);
         } else {
-            // Show more detailed error info
-            showError(`Error: ${JSON.stringify(data)}`);
+            const errorMsg = data.message || data.error || 'User not found or invalid SID';
+            showError(`API Error: ${errorMsg}`);
         }
     } catch (error) {
         console.error('Error fetching data:', error);
-        showError('Error fetching data. Please check your connection and try again.');
+        let errorMessage = 'Error fetching data. ';
+        
+        if (error.message.includes('CORS')) {
+            errorMessage += 'CORS policy is blocking the request. You may need to run this from a server.';
+        } else if (error.message.includes('Failed to fetch')) {
+            errorMessage += 'Network error. Please check your internet connection.';
+        } else {
+            errorMessage += 'Please try again later.';
+        }
+        
+        showError(errorMessage);
     } finally {
         showLoading(false);
     }
 }
 
-// Event listeners
-document.addEventListener('DOMContentLoaded', function() {
+// Initialize the application
+function initializeApp() {
+    // Create particles if container exists
+    createParticles();
+    
+    // Set up event listeners
     const fetchBtn = document.getElementById('fetchBtn');
     const sidInput = document.getElementById('sidInput');
     
-    // Button click event
-    fetchBtn.addEventListener('click', handleFetch);
+    if (fetchBtn) {
+        fetchBtn.addEventListener('click', handleFetch);
+    }
     
-    // Enter key event
-    sidInput.addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') {
-            handleFetch();
+    if (sidInput) {
+        // Enter key event
+        sidInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                handleFetch();
+            }
+        });
+        
+        // Input validation - only allow numbers
+        sidInput.addEventListener('input', function(e) {
+            e.target.value = e.target.value.replace(/[^0-9]/g, '');
+        });
+        
+        // Add placeholder if not already set
+        if (!sidInput.placeholder) {
+            sidInput.placeholder = 'Enter StarMaker SID (numbers only)';
         }
-    });
-    
-    // Input validation - only allow numbers
-    sidInput.addEventListener('input', function(e) {
-        e.target.value = e.target.value.replace(/[^0-9]/g, '');
-    });
-});
+    }
+}
+
+// Event listeners
+document.addEventListener('DOMContentLoaded', initializeApp);
+
+// Also initialize if DOM is already loaded
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initializeApp);
+} else {
+    initializeApp();
+}
