@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fetch StarMaker ID Info</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="bg-animation"></div>
+    <div class="particles" id="particles"></div>
+    
+    <div class="container">
+        <div class="header">
+            <h1 class="title">Fetch StarMaker ID Info</h1>
+            <p class="subtitle">Enter a StarMaker SID to get detailed user information</p>
+        </div>
+        
+        <div class="search-section">
+            <div class="input-group">
+                <div class="input-wrapper">
+                    <input type="text" id="sidInput" class="sid-input" placeholder="Enter StarMaker SID (e.g., 62122529777)" />
+                </div>
+                <button id="fetchBtn" class="fetch-btn">Fetch Info</button>
+            </div>
+        </div>
+        
+        <div class="loading hidden" id="loading">
+            <div class="spinner"></div>
+            <p>Fetching user information...</p>
+        </div>
+        
+        <div id="result"></div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
