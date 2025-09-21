@@ -17,7 +17,7 @@ function createParticles() {
 createParticles();
 
 // API configuration
-const API_URL = 'https://starmaker.id.vn/wp-admin/admin-ajax.php';
+const API_URL = 'https://cors-anywhere.herokuapp.com/https://starmaker.id.vn/wp-admin/admin-ajax.php';
 const NONCE = '17684aaf53';
 
 // Fetch user data from StarMaker API
