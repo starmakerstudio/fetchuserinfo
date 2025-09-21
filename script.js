@@ -24,23 +24,34 @@ async function getFreshNonce() {
         const formData = new URLSearchParams();
         formData.append('action', 'info_id_sm_get_nonce');
         
+        // Sending the POST request for nonce
         const response = await fetch(API_BASE_URL, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
-                'Accept': 'application/json',
+                'Accept': '/',
+                'Sec-Ch-Ua-Platform': '"Windows"',
+                'X-Requested-With': 'XMLHttpRequest',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
+                'Origin': 'https://starmaker.id.vn',
+                'Sec-Fetch-Site': 'same-origin',
+                'Sec-Fetch-Mode': 'cors',
+                'Sec-Fetch-Dest': 'empty',
+                'Referer': 'https://starmaker.id.vn/',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Accept-Language': 'en-US,en;q=0.9,hi;q=0.8',
             },
             body: formData
         });
-        
+
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
-        
+
         const data = await response.json();
         console.log('Nonce response:', data);
-        
-        return data.success ? data.data.nonce : '17684aaf53';
+
+        return data.success ? data.data.nonce : '17684aaf53'; // fallback nonce
     } catch (error) {
         console.warn('Failed to get fresh nonce:', error);
         return '17684aaf53'; // fallback nonce
@@ -52,12 +63,12 @@ async function fetchUserData(sid) {
     try {
         const nonce = await getFreshNonce();
         console.log('Using nonce:', nonce);
-        
+
         const formData = new URLSearchParams();
         formData.append('action', 'info_id_sm_fetch');
         formData.append('sid', sid);
         formData.append('nonce', nonce);
-        
+
         const response = await fetch(API_BASE_URL, {
             method: 'POST',
             headers: {
@@ -66,18 +77,18 @@ async function fetchUserData(sid) {
             },
             body: formData
         });
-        
+
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
-        
+
         const data = await response.json();
         console.log('User data response:', data);
-        
+
         return data;
     } catch (error) {
-        console.error('Error in fetchUserData:', error);
-        throw error;
+        console.warn('Direct API call failed, trying proxy method:', error);
+        return await fetchUserDataWithProxy(sid); // Fallback to proxy method
     }
 }
 
@@ -86,12 +97,12 @@ async function fetchUserDataWithProxy(sid) {
     try {
         const PROXY_URL = 'https://cors-anywhere.herokuapp.com/';
         const nonce = '17684aaf53'; // Use default nonce for proxy method
-        
+
         const formData = new URLSearchParams();
         formData.append('action', 'info_id_sm_fetch');
         formData.append('sid', sid);
         formData.append('nonce', nonce);
-        
+
         const response = await fetch(PROXY_URL + API_BASE_URL, {
             method: 'POST',
             headers: {
@@ -100,11 +111,11 @@ async function fetchUserDataWithProxy(sid) {
             },
             body: formData
         });
-        
+
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
-        
+
         return await response.json();
     } catch (error) {
         console.error('Error with proxy method:', error);
