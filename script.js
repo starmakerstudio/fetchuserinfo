@@ -21,14 +21,34 @@ const PROXY_URL = 'https://api.allorigins.win/raw?url=';
 const API_URL = PROXY_URL + encodeURIComponent('https://starmaker.id.vn/wp-admin/admin-ajax.php');
 const NONCE = '17684aaf53';
 
-// Fetch user data from StarMaker API
+// Add this function to get a fresh nonce
+async function getFreshNonce() {
+    try {
+        const response = await fetch('https://starmaker.id.vn/wp-admin/admin-ajax.php', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: 'action=info_id_sm_get_nonce'
+        });
+        
+        const data = await response.json();
+        return data.success ? data.data.nonce : '17684aaf53';
+    } catch (error) {
+        return '17684aaf53'; // fallback
+    }
+}
+
+// Update fetchUserData to use fresh nonce
 async function fetchUserData(sid) {
+    const nonce = await getFreshNonce();
+    
     const formData = new URLSearchParams();
     formData.append('action', 'info_id_sm_fetch');
     formData.append('sid', sid);
-    formData.append('nonce', NONCE);
+    formData.append('nonce', nonce);
     
-    const response = await fetch(API_URL, {
+    const response = await fetch('https://starmaker.id.vn/wp-admin/admin-ajax.php', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
@@ -231,11 +251,15 @@ async function handleFetch() {
     
     try {
         const data = await fetchUserData(sid);
+
+        // Add debugging
+        console.log('API Response:', data);
         
         if (data.success && data.data) {
             displayUserData(data.data);
         } else {
-            showError(data.data?.message || 'User not found or invalid SID');
+            // Show more detailed error info
+            showError(`Error: ${JSON.stringify(data)}`);
         }
     } catch (error) {
         console.error('Error fetching data:', error);
