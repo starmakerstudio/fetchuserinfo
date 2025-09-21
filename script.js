@@ -16,7 +16,7 @@ function createParticles() {
 }
 
 // API configuration
-const API_BASE_URL = 'https://starmaker.id.vn/wp-admin/admin-ajax.php';
+const API_BASE_URL = 'http://localhost:3000/api';
 
 // Get fresh nonce from the API
 async function getFreshNonce() {
