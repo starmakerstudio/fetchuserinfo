@@ -95,7 +95,7 @@ async function fetchUserData(sid) {
 // Alternative fetch method using CORS proxy if direct API fails
 async function fetchUserDataWithProxy(sid) {
     try {
-        const PROXY_URL = 'https://api.allorigins.win/get?url=';
+        const PROXY_URL = 'https://thingproxy.freeboard.io/fetch/';
         const nonce = '17684aaf53'; // Use default nonce for proxy method
 
         const formData = new URLSearchParams();
