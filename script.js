@@ -18,59 +18,25 @@ function createParticles() {
     }
 }
 
-// API configuration - Updated with better error handling
+// API configuration - NO FALLBACK NONCES
 const API_BASE_URL = 'https://starmaker-proxy.onrender.com/api';
 const BACKUP_API_URL = 'https://starmaker.id.vn/wp-admin/admin-ajax.php';
 
-// Enhanced nonce fetching with retry logic
-async function getFreshNonce(retries = 3) {
-    for (let attempt = 1; attempt <= retries; attempt++) {
-        try {
-            console.log(`Attempting to get nonce (attempt ${attempt}/${retries})`);
-            
-            const formData = new URLSearchParams();
-            formData.append('action', 'info_id_sm_get_nonce');
-            
-            const response = await fetch(API_BASE_URL, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                    'Accept': 'application/json',
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Origin': 'https://starmaker.id.vn',
-                    'Referer': 'https://starmaker.id.vn/',
-                },
-                body: formData,
-                timeout: 15000
-            });
-
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            }
-
-            const data = await response.json();
-            console.log('Nonce response:', data);
-
-            if (data.success && data.data && data.data.nonce) {
-                return data.data.nonce;
-            } else {
-                throw new Error('Invalid nonce response format');
-            }
-        } catch (error) {
-            console.warn(`Nonce attempt ${attempt} failed:`, error.message);
-            
-            if (attempt === retries) {
-                console.warn('All nonce attempts failed, using fallback');
-                return '17684aaf53'; // fallback nonce
-            }
-            
-            // Wait before retry (exponential backoff)
-            await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
-        }
+// Test API connectivity on load
+async function testAPIConnectivity() {
+    try {
+        console.log('Testing API connectivity...');
+        const response = await fetch('https://starmaker-proxy.onrender.com/health');
+        const data = await response.json();
+        console.log('API server status:', data.status);
+        return true;
+    } catch (error) {
+        console.error('API server unreachable:', error);
+        return false;
     }
 }
 
-// Enhanced fetch with better error handling and timeout
+// Enhanced fetch with timeout
 async function fetchWithTimeout(url, options, timeoutMs = 20000) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -91,14 +57,62 @@ async function fetchWithTimeout(url, options, timeoutMs = 20000) {
     }
 }
 
-// Primary fetch method with enhanced error handling
+// ALWAYS get fresh nonce - NO FALLBACK
+async function getFreshNonce(retries = 3) {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+            console.log(`🔑 Getting fresh nonce (attempt ${attempt}/${retries})`);
+            
+            const formData = new URLSearchParams();
+            formData.append('action', 'info_id_sm_get_nonce');
+            
+            const response = await fetchWithTimeout(API_BASE_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'Accept': 'application/json',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Origin': 'https://starmaker.id.vn',
+                    'Referer': 'https://starmaker.id.vn/',
+                },
+                body: formData
+            }, 15000);
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const data = await response.json();
+            console.log('✅ Nonce response:', data);
+
+            if (data.success && data.data && data.data.nonce) {
+                console.log(`🎯 Fresh nonce obtained: ${data.data.nonce}`);
+                return data.data.nonce;
+            } else {
+                throw new Error('Invalid nonce response format');
+            }
+        } catch (error) {
+            console.warn(`❌ Nonce attempt ${attempt} failed:`, error.message);
+            
+            if (attempt === retries) {
+                throw new Error(`💥 FAILED to get fresh nonce after ${retries} attempts. NO FALLBACK AVAILABLE.`);
+            }
+            
+            // Wait before retry (exponential backoff)
+            await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+        }
+    }
+}
+
+// Primary fetch method - ALWAYS get fresh nonce
 async function fetchUserData(sid) {
     try {
-        console.log('Fetching user data for SID:', sid);
+        console.log('🚀 Primary method: Fetching user data for SID:', sid);
         
+        // ALWAYS get fresh nonce first
         const nonce = await getFreshNonce();
-        console.log('Using nonce:', nonce);
-
+        
+        console.log('📤 Making user data request with fresh nonce...');
         const formData = new URLSearchParams();
         formData.append('action', 'info_id_sm_fetch');
         formData.append('sid', sid);
@@ -121,27 +135,59 @@ async function fetchUserData(sid) {
         }
 
         const data = await response.json();
-        console.log('User data response:', data);
-
+        console.log('✅ User data response:', data);
         return data;
     } catch (error) {
-        console.warn('Primary fetch failed:', error.message);
+        console.warn('❌ Primary fetch failed:', error.message);
         throw error;
     }
 }
 
-// Fallback method using CORS proxy
+// Proxy method - ALWAYS get fresh nonce
 async function fetchUserDataWithProxy(sid) {
     try {
-        console.log('Using proxy fallback method');
+        console.log('🔄 Proxy method: Getting fresh nonce via proxy...');
         
         const PROXY_URL = 'https://api.allorigins.win/get?url=';
         const encodedUrl = encodeURIComponent(BACKUP_API_URL);
         
+        // Step 1: Get fresh nonce via proxy
+        const nonceFormData = new URLSearchParams();
+        nonceFormData.append('action', 'info_id_sm_get_nonce');
+
+        const nonceResponse = await fetchWithTimeout(`${PROXY_URL}${encodedUrl}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: nonceFormData
+        }, 25000);
+
+        if (!nonceResponse.ok) {
+            throw new Error(`Proxy nonce HTTP ${nonceResponse.status}: ${nonceResponse.statusText}`);
+        }
+
+        const nonceProxyData = await nonceResponse.json();
+        let nonce;
+        
+        if (nonceProxyData.contents) {
+            const nonceData = JSON.parse(nonceProxyData.contents);
+            if (nonceData.success && nonceData.data && nonceData.data.nonce) {
+                nonce = nonceData.data.nonce;
+                console.log(`🎯 Fresh nonce via proxy: ${nonce}`);
+            } else {
+                throw new Error('Invalid nonce response from proxy');
+            }
+        } else {
+            throw new Error('Invalid proxy nonce response');
+        }
+
+        // Step 2: Use fresh nonce to fetch user data
+        console.log('📤 Fetching user data with fresh nonce via proxy...');
         const formData = new URLSearchParams();
         formData.append('action', 'info_id_sm_fetch');
         formData.append('sid', sid);
-        formData.append('nonce', '17684aaf53');
+        formData.append('nonce', nonce);
 
         const response = await fetchWithTimeout(`${PROXY_URL}${encodedUrl}`, {
             method: 'POST',
@@ -163,18 +209,17 @@ async function fetchUserDataWithProxy(sid) {
             throw new Error('Invalid proxy response format');
         }
     } catch (error) {
-        console.error('Proxy method failed:', error.message);
+        console.error('❌ Proxy method failed:', error.message);
         throw error;
     }
 }
 
-// Direct API call as last resort - ALWAYS get fresh nonce
+// Direct API method - ALWAYS get fresh nonce
 async function fetchUserDataDirect(sid) {
     try {
-        console.log('Attempting direct API call - getting fresh nonce...');
+        console.log('🎯 Direct method: Getting fresh nonce directly...');
         
         // Step 1: Get fresh nonce directly
-        console.log('Getting fresh nonce via direct API...');
         const nonceFormData = new URLSearchParams();
         nonceFormData.append('action', 'info_id_sm_get_nonce');
 
@@ -197,13 +242,13 @@ async function fetchUserDataDirect(sid) {
         
         if (nonceData.success && nonceData.data && nonceData.data.nonce) {
             nonce = nonceData.data.nonce;
-            console.log('Fresh nonce obtained via direct API:', nonce);
+            console.log(`🎯 Fresh nonce via direct: ${nonce}`);
         } else {
-            throw new Error('Invalid nonce response format from direct API');
+            throw new Error('Invalid nonce response from direct API');
         }
 
         // Step 2: Use fresh nonce to fetch user data
-        console.log('Fetching user data with fresh nonce via direct API...');
+        console.log('📤 Fetching user data with fresh nonce via direct...');
         const formData = new URLSearchParams();
         formData.append('action', 'info_id_sm_fetch');
         formData.append('sid', sid);
@@ -225,7 +270,7 @@ async function fetchUserDataDirect(sid) {
 
         return await response.json();
     } catch (error) {
-        console.error('Direct API call failed:', error.message);
+        console.error('❌ Direct method failed:', error.message);
         throw error;
     }
 }
@@ -269,93 +314,17 @@ function getSafeImageUrl(url, defaultUrl = 'https://via.placeholder.com/150x150/
     return url;
 }
 
-// Enhanced display function with better error handling
-function displayUserData(data) {
-    try {
-        const user = data.share_user;
-        const family = data.share_user_family;
-        
-        if (!user) {
-            throw new Error('Invalid user data structure');
-        }
-        
-        const resultContainer = document.getElementById('result');
-        if (!resultContainer) {
-            throw new Error('Result container not found');
-        }
-        
-        const vipBadge = user.is_vip_v2 ? '<div class="vip-badge">VIP</div>' : '';
-        const profileImage = getSafeImageUrl(user.profile_image);
-        
-        resultContainer.innerHTML = `
-            <div class="result-container">
-                <div class="user-header">
-                    <div class="profile-section">
-                        <div style="position: relative;">
-                            <img src="${profileImage}" 
-                                 alt="Profile" 
-                                 class="profile-image" 
-                                 onerror="this.src='https://via.placeholder.com/150x150/4f46e5/ffffff?text=No+Image'" />
-                            ${vipBadge}
-                        </div>
-                    </div>
-                    <div class="user-details">
-                        <h2 class="user-name">${escapeHtml(user.stage_name || 'Unknown User')}</h2>
-                        <div class="info-item">
-                            <span class="info-label">Real Name:</span>
-                            <span class="info-value">${escapeHtml(user.name || 'Not provided')}</span>
-                        </div>
-                        <div class="info-item">
-                            <span class="info-label">SID:</span>
-                            <span class="info-value">${escapeHtml(user.sid || 'N/A')}</span>
-                        </div>
-                        <div class="info-item">
-                            <span class="info-label">User ID:</span>
-                            <span class="info-value">${escapeHtml(user.id || 'N/A')}</span>
-                        </div>
-                        <div class="info-item">
-                            <span class="info-label">Signature:</span>
-                            <span class="info-value">${escapeHtml(user.signature || 'No signature')}</span>
-                        </div>
-                        <div class="info-item">
-                            <span class="info-label">Age:</span>
-                            <span class="info-value">${escapeHtml(user.age || 'Not specified')}</span>
-                        </div>
-                        <div class="info-item">
-                            <span class="info-label">Hometown:</span>
-                            <span class="info-value">${escapeHtml(user.hometown || 'Not specified')}</span>
-                        </div>
-                    </div>
-                </div>
-                
-                ${generateVerificationSection(user)}
-                
-                <div class="stats-grid">
-                    <div class="stat-card">
-                        <span class="stat-number">${user.user_level || 0}</span>
-                        <span class="stat-label">User Level</span>
-                    </div>
-                    <div class="stat-card">
-                        <span class="stat-number">${formatNumber(user.experience)}</span>
-                        <span class="stat-label">Experience</span>
-                    </div>
-                    <div class="stat-card">
-                        <span class="stat-number">${formatDate(user.created_on)}</span>
-                        <span class="stat-label">Joined</span>
-                    </div>
-                    <div class="stat-card">
-                        <span class="stat-number">${user.is_vip_v2 ? 'Yes' : 'No'}</span>
-                        <span class="stat-label">VIP Status</span>
-                    </div>
-                </div>
-                
-                ${generateFamilySection(family)}
-            </div>
-        `;
-    } catch (error) {
-        console.error('Error displaying user data:', error);
-        showError('Error displaying user information: ' + error.message);
-    }
+// HTML escape function for security
+function escapeHtml(text) {
+    if (typeof text !== 'string') return text;
+    const map = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+    };
+    return text.replace(/[&<>"']/g, function(m) { return map[m]; });
 }
 
 // Helper function to generate verification section
@@ -443,17 +412,95 @@ function generateFamilySection(family) {
     `;
 }
 
-// HTML escape function for security
-function escapeHtml(text) {
-    if (typeof text !== 'string') return text;
-    const map = {
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        '"': '&quot;',
-        "'": '&#039;'
-    };
-    return text.replace(/[&<>"']/g, function(m) { return map[m]; });
+// Enhanced display function
+function displayUserData(data) {
+    try {
+        const user = data.share_user;
+        const family = data.share_user_family;
+        
+        if (!user) {
+            throw new Error('Invalid user data structure');
+        }
+        
+        const resultContainer = document.getElementById('result');
+        if (!resultContainer) {
+            throw new Error('Result container not found');
+        }
+        
+        const vipBadge = user.is_vip_v2 ? '<div class="vip-badge">VIP</div>' : '';
+        const profileImage = getSafeImageUrl(user.profile_image);
+        
+        resultContainer.innerHTML = `
+            <div class="result-container">
+                <div class="user-header">
+                    <div class="profile-section">
+                        <div style="position: relative;">
+                            <img src="${profileImage}" 
+                                 alt="Profile" 
+                                 class="profile-image" 
+                                 onerror="this.src='https://via.placeholder.com/150x150/4f46e5/ffffff?text=No+Image'" />
+                            ${vipBadge}
+                        </div>
+                    </div>
+                    <div class="user-details">
+                        <h2 class="user-name">${escapeHtml(user.stage_name || 'Unknown User')}</h2>
+                        <div class="info-item">
+                            <span class="info-label">Real Name:</span>
+                            <span class="info-value">${escapeHtml(user.name || 'Not provided')}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">SID:</span>
+                            <span class="info-value">${escapeHtml(user.sid || 'N/A')}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">User ID:</span>
+                            <span class="info-value">${escapeHtml(user.id || 'N/A')}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Signature:</span>
+                            <span class="info-value">${escapeHtml(user.signature || 'No signature')}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Age:</span>
+                            <span class="info-value">${escapeHtml(user.age || 'Not specified')}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Hometown:</span>
+                            <span class="info-value">${escapeHtml(user.hometown || 'Not specified')}</span>
+                        </div>
+                    </div>
+                </div>
+                
+                ${generateVerificationSection(user)}
+                
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <span class="stat-number">${user.user_level || 0}</span>
+                        <span class="stat-label">User Level</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-number">${formatNumber(user.experience)}</span>
+                        <span class="stat-label">Experience</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-number">${formatDate(user.created_on)}</span>
+                        <span class="stat-label">Joined</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-number">${user.is_vip_v2 ? 'Yes' : 'No'}</span>
+                        <span class="stat-label">VIP Status</span>
+                    </div>
+                </div>
+                
+                ${generateFamilySection(family)}
+            </div>
+        `;
+        
+        console.log('✅ User data displayed successfully');
+    } catch (error) {
+        console.error('❌ Error displaying user data:', error);
+        showError('Error displaying user information: ' + error.message);
+    }
 }
 
 // Enhanced error display
@@ -470,8 +517,9 @@ function showError(message) {
                 <ul>
                     <li>Check that the SID is correct and exists</li>
                     <li>Ensure you have a stable internet connection</li>
+                    <li>Fresh nonce is required - no fallback available</li>
                     <li>Try again in a few moments</li>
-                    <li>If CORS errors persist, the proxy server might be down</li>
+                    <li>If errors persist, the API server might be down</li>
                 </ul>
             </div>
         </div>
@@ -530,7 +578,7 @@ function validateSID(sid) {
     return { valid: true };
 }
 
-// Main function with cascade fallback strategy
+// Main function with cascade fallback strategy - NO FALLBACK NONCES
 async function handleFetch() {
     const sidInput = document.getElementById('sidInput');
     const sid = sidInput?.value?.trim();
@@ -559,10 +607,10 @@ async function handleFetch() {
         const method = methods[i];
         
         try {
-            console.log(`Trying ${method.name}...`);
+            console.log(`🚀 Trying ${method.name}...`);
             const data = await method.func();
             
-            console.log(`${method.name} response:`, data);
+            console.log(`✅ ${method.name} successful:`, data);
             
             if (data && data.success && data.data) {
                 displayUserData(data.data);
@@ -572,24 +620,27 @@ async function handleFetch() {
                 throw new Error(`${method.name}: ${errorMsg}`);
             }
         } catch (error) {
-            console.warn(`${method.name} failed:`, error.message);
+            console.warn(`❌ ${method.name} failed:`, error.message);
             
             if (i === methods.length - 1) {
                 // All methods failed
-                let errorMessage = 'All fetch methods failed. ';
+                let errorMessage = '💥 All fetch methods failed. ';
                 
-                if (error.message.includes('timeout')) {
-                    errorMessage += 'The request timed out. Please try again.';
+                if (error.message.includes('fresh nonce')) {
+                    errorMessage += 'Unable to obtain fresh security token. ';
+                } else if (error.message.includes('timeout')) {
+                    errorMessage += 'The request timed out. ';
                 } else if (error.message.includes('CORS')) {
-                    errorMessage += 'CORS policy blocked the request.';
+                    errorMessage += 'CORS policy blocked the request. ';
                 } else if (error.message.includes('network') || error.message.includes('fetch')) {
-                    errorMessage += 'Network error. Check your connection.';
+                    errorMessage += 'Network error. Check your connection. ';
                 } else if (error.message.includes('not found') || error.message.includes('404')) {
-                    errorMessage += 'User not found. Check the SID.';
+                    errorMessage += 'User not found. Check the SID. ';
                 } else {
-                    errorMessage += 'Please try again later.';
+                    errorMessage += 'Server error occurred. ';
                 }
                 
+                errorMessage += 'NO FALLBACK NONCES AVAILABLE.';
                 showError(errorMessage);
             }
         }
@@ -600,7 +651,16 @@ async function handleFetch() {
 
 // Enhanced initialization
 function initializeApp() {
-    console.log('Initializing StarMaker Info Fetcher...');
+    console.log('🚀 Initializing StarMaker Info Fetcher (NO FALLBACK VERSION)...');
+    
+    // Test API connectivity first
+    testAPIConnectivity().then(connected => {
+        if (!connected) {
+            showError('⚠️ Cannot connect to proxy server. Please check if the server is running.');
+        } else {
+            console.log('✅ API server is reachable');
+        }
+    });
     
     // Create particles if container exists
     try {
@@ -615,7 +675,7 @@ function initializeApp() {
     
     if (fetchBtn) {
         fetchBtn.addEventListener('click', handleFetch);
-        console.log('Fetch button listener added');
+        console.log('✅ Fetch button listener added');
     }
     
     if (sidInput) {
@@ -637,10 +697,12 @@ function initializeApp() {
             sidInput.placeholder = 'Enter StarMaker SID (numbers only)';
         }
         
-        console.log('SID input listeners added');
+        console.log('✅ SID input listeners added');
     }
     
-    console.log('App initialization complete');
+    console.log('✅ App initialization complete (NO FALLBACK MODE)');
+    console.log('🎯 API endpoint:', API_BASE_URL);
+    console.log('⚠️ WARNING: NO FALLBACK NONCES - Fresh nonces required!');
 }
 
 // Event listeners with better error handling
