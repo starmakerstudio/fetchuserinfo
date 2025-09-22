@@ -277,6 +277,23 @@ function showLoading(show) {
     }
 }
 
+// Validate SID input
+function validateSID(sid) {
+    if (!sid || sid.trim() === '') {
+        return { valid: false, message: 'Please enter a valid SID' };
+    }
+    
+    if (!/^\d+$/.test(sid.trim())) {
+        return { valid: false, message: 'SID must contain only numbers' };
+    }
+    
+    if (sid.trim().length < 5) {
+        return { valid: false, message: 'SID must be at least 5 digits long' };
+    }
+    
+    return { valid: true };
+}
+
 // Main function to handle fetching user data
 async function handleFetch() {
     const sidInput = document.getElementById('sidInput');
@@ -285,6 +302,13 @@ async function handleFetch() {
     // Clear previous results
     const resultContainer = document.getElementById('result');
     if (resultContainer) resultContainer.innerHTML = '';
+
+    // Validate SID input
+    const validation = validateSID(sid);
+    if (!validation.valid) {
+        showError(validation.message);
+        return;
+    }
     
     // Show loading state
     showLoading(true);
