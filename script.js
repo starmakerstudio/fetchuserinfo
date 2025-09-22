@@ -48,7 +48,7 @@ async function getFreshNonce() {
 }
 
 // Fetch user data from StarMaker API
-async function fetchUserData(sid) {
+async function fetchUser Data(sid) {
     try {
         const nonce = await getFreshNonce();
         if (!nonce) throw new Error('No nonce');
