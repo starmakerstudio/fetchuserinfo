@@ -286,13 +286,6 @@ async function handleFetch() {
     const resultContainer = document.getElementById('result');
     if (resultContainer) resultContainer.innerHTML = '';
     
-    // Validate SID input
-    const validation = validateSID(sid);
-    if (!validation.valid) {
-        showError(validation.message);
-        return;
-    }
-    
     // Show loading state
     showLoading(true);
     
