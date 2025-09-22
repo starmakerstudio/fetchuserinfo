@@ -65,14 +65,14 @@ async function testAPIConnectivity() {
         
         if (response.ok) {
             const data = await response.json();
-            console.log('✅ API server status:', data.status);
+            // console.log('✅ API server status:', data.status);
             return { success: true, data };
         } else {
             console.warn('⚠️ API server returned:', response.status, response.statusText);
             return { success: false, error: `Server returned ${response.status}` };
         }
     } catch (error) {
-        console.error('❌ API server unreachable:', error.message);
+       // console.error('❌ API server unreachable:', error.message);
         return { success: false, error: error.message };
     }
 }
@@ -91,15 +91,15 @@ function isNonceValid() {
 async function getFreshNonce(retries = 3) {
     // Check if current nonce is still valid
     if (isNonceValid()) {
-        console.log('🔄 Using cached valid nonce');
+      //  console.log('🔄 Using cached valid nonce');
         return currentNonce;
     }
     
-    console.log('🔑 Getting fresh nonce...');
+  //  console.log('🔑 Getting fresh nonce...');
     
     for (let attempt = 1; attempt <= retries; attempt++) {
         try {
-            console.log(`📡 Nonce request attempt ${attempt}/${retries}`);
+         //   console.log(`📡 Nonce request attempt ${attempt}/${retries}`);
             
             const formData = new URLSearchParams();
             formData.append('action', 'info_id_sm_get_nonce');
@@ -128,22 +128,22 @@ async function getFreshNonce(retries = 3) {
             try {
                 data = JSON.parse(responseText);
             } catch (parseError) {
-                console.error('❌ Failed to parse nonce response:', responseText.substring(0, 200));
+             //   console.error('❌ Failed to parse nonce response:', responseText.substring(0, 200));
                 throw new Error('Invalid JSON response from server');
             }
 
-            console.log('📥 Nonce response:', data);
+          //  console.log('📥 Nonce response:', data);
 
             if (data.success && data.data && data.data.nonce) {
                 currentNonce = data.data.nonce;
                 nonceTimestamp = Date.now();
-                console.log(`🎯 Fresh nonce obtained: ${currentNonce}`);
+              //  console.log(`🎯 Fresh nonce obtained: ${currentNonce}`);
                 return currentNonce;
             } else {
                 throw new Error(`Invalid nonce response: ${data.message || 'Unknown error'}`);
             }
         } catch (error) {
-            console.warn(`⚠️ Nonce attempt ${attempt} failed:`, error.message);
+        //    console.warn(`⚠️ Nonce attempt ${attempt} failed:`, error.message);
             
             if (attempt === retries) {
                 // Clear invalid cached nonce
@@ -154,7 +154,7 @@ async function getFreshNonce(retries = 3) {
             
             // Exponential backoff
             const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
-            console.log(`⏳ Waiting ${delay}ms before retry...`);
+         //   console.log(`⏳ Waiting ${delay}ms before retry...`);
             await new Promise(resolve => setTimeout(resolve, delay));
         }
     }
@@ -163,12 +163,12 @@ async function getFreshNonce(retries = 3) {
 // Primary fetch method with improved error handling
 async function fetchUserData(sid) {
     try {
-        console.log('🚀 Fetching user data for SID:', sid);
+      //  console.log('🚀 Fetching user data for SID:', sid);
         
         // Get fresh nonce
         const nonce = await getFreshNonce();
         
-        console.log('📤 Making user data request...');
+    //    console.log('📤 Making user data request...');
         const formData = new URLSearchParams();
         formData.append('action', 'info_id_sm_fetch');
         formData.append('sid', sid);
@@ -198,11 +198,11 @@ async function fetchUserData(sid) {
         try {
             data = JSON.parse(responseText);
         } catch (parseError) {
-            console.error('❌ Failed to parse user data response:', responseText.substring(0, 200));
+         //   console.error('❌ Failed to parse user data response:', responseText.substring(0, 200));
             throw new Error('Invalid JSON response from server');
         }
 
-        console.log('📥 User data response:', data);
+     //   console.log('📥 User data response:', data);
         
         // Handle different response formats
         if (data.success === false) {
@@ -217,7 +217,7 @@ async function fetchUserData(sid) {
         
         return data;
     } catch (error) {
-        console.warn('⚠️ Primary fetch failed:', error.message);
+     //   console.warn('⚠️ Primary fetch failed:', error.message);
         
         // Clear nonce on certain errors
         if (error.message.includes('nonce') || error.message.includes('invalid')) {
@@ -232,7 +232,7 @@ async function fetchUserData(sid) {
 // Backup method - Direct API call
 async function fetchUserDataDirect(sid) {
     try {
-        console.log('🎯 Direct method: Attempting direct API call...');
+      //  console.log('🎯 Direct method: Attempting direct API call...');
         
         // Step 1: Get nonce directly
         const nonceFormData = new URLSearchParams();
@@ -262,10 +262,10 @@ async function fetchUserDataDirect(sid) {
         }
         
         const nonce = nonceData.data.nonce;
-        console.log(`🎯 Direct nonce obtained: ${nonce}`);
+      //  console.log(`🎯 Direct nonce obtained: ${nonce}`);
 
         // Step 2: Fetch user data
-        console.log('📤 Making direct user data request...');
+      //  console.log('📤 Making direct user data request...');
         const formData = new URLSearchParams();
         formData.append('action', 'info_id_sm_fetch');
         formData.append('sid', sid);
@@ -290,7 +290,7 @@ async function fetchUserDataDirect(sid) {
 
         return await response.json();
     } catch (error) {
-        console.error('❌ Direct method failed:', error.message);
+      //  console.error('❌ Direct method failed:', error.message);
         throw error;
     }
 }
@@ -298,7 +298,7 @@ async function fetchUserDataDirect(sid) {
 // Proxy method using CORS proxy
 async function fetchUserDataWithProxy(sid) {
     try {
-        console.log('🔄 Proxy method: Using CORS proxy...');
+     //   console.log('🔄 Proxy method: Using CORS proxy...');
         
         const PROXY_URL = 'https://api.allorigins.win/get?url=';
         const encodedUrl = encodeURIComponent(BACKUP_API_URL);
@@ -326,7 +326,7 @@ async function fetchUserDataWithProxy(sid) {
             const nonceData = JSON.parse(nonceProxyData.contents);
             if (nonceData.success && nonceData.data && nonceData.data.nonce) {
                 nonce = nonceData.data.nonce;
-                console.log(`🎯 Proxy nonce obtained: ${nonce}`);
+             //   console.log(`🎯 Proxy nonce obtained: ${nonce}`);
             } else {
                 throw new Error('Invalid nonce response from proxy');
             }
@@ -335,7 +335,7 @@ async function fetchUserDataWithProxy(sid) {
         }
 
         // Step 2: Fetch user data via proxy
-        console.log('📤 Making proxy user data request...');
+      //  console.log('📤 Making proxy user data request...');
         const formData = new URLSearchParams();
         formData.append('action', 'info_id_sm_fetch');
         formData.append('sid', sid);
@@ -361,7 +361,7 @@ async function fetchUserDataWithProxy(sid) {
             throw new Error('Invalid proxy response format');
         }
     } catch (error) {
-        console.error('❌ Proxy method failed:', error.message);
+      //  console.error('❌ Proxy method failed:', error.message);
         throw error;
     }
 }
@@ -583,9 +583,9 @@ function displayUserData(data) {
             </div>
         `;
         
-        console.log('✅ User data displayed successfully');
+      //  console.log('✅ User data displayed successfully');
     } catch (error) {
-        console.error('❌ Error displaying user data:', error);
+     //   console.error('❌ Error displaying user data:', error);
         showError('Error displaying user information: ' + error.message);
     }
 }
@@ -716,13 +716,13 @@ async function handleFetch() {
         const method = methods[i];
         
         try {
-            console.log(`🚀 Attempting ${method.name} (Priority ${method.priority})...`);
+          //  console.log(`🚀 Attempting ${method.name} (Priority ${method.priority})...`);
             const startTime = Date.now();
             
             const data = await method.func();
             const duration = Date.now() - startTime;
             
-            console.log(`✅ ${method.name} successful in ${duration}ms:`, data);
+         //   console.log(`✅ ${method.name} successful in ${duration}ms:`, data);
             
             // Validate response structure
             if (!data) {
@@ -748,13 +748,13 @@ async function handleFetch() {
             
         } catch (error) {
             lastError = error;
-            console.warn(`⚠️ ${method.name} failed:`, error.message);
+        //    console.warn(`⚠️ ${method.name} failed:`, error.message);
             
             // If it's a nonce error and we have more methods, clear the nonce
             if (error.message.toLowerCase().includes('nonce') && i < methods.length - 1) {
                 currentNonce = null;
                 nonceTimestamp = null;
-                console.log('🔄 Cleared invalid nonce, will retry with fresh nonce');
+            //    console.log('🔄 Cleared invalid nonce, will retry with fresh nonce');
             }
         }
     }
@@ -784,14 +784,14 @@ async function handleFetch() {
 
 // Application initialization
 function initializeApp() {
-    console.log('🚀 Initializing StarMaker Info Fetcher v2.1...');
+ //   console.log('🚀 Initializing StarMaker Info Fetcher v2.1...');
     
     // Test API connectivity
     testAPIConnectivity().then(result => {
         if (result.success) {
-            console.log('✅ API server is reachable:', result.data?.message);
+        //    console.log('✅ API server is reachable:', result.data?.message);
         } else {
-            console.warn('⚠️ API server issue:', result.error);
+        //    console.warn('⚠️ API server issue:', result.error);
             showError('⚠️ Proxy server connectivity issues detected. Some features may not work properly.');
         }
     });
@@ -799,9 +799,9 @@ function initializeApp() {
     // Create particles
     try {
         createParticles();
-        console.log('✅ Particles initialized');
+     //   console.log('✅ Particles initialized');
     } catch (error) {
-        console.warn('⚠️ Failed to create particles:', error);
+    //    console.warn('⚠️ Failed to create particles:', error);
     }
     
     // Set up event listeners
@@ -810,7 +810,7 @@ function initializeApp() {
     
     if (fetchBtn) {
         fetchBtn.addEventListener('click', handleFetch);
-        console.log('✅ Fetch button listener added');
+      //  console.log('✅ Fetch button listener added');
     }
     
     if (sidInput) {
@@ -835,13 +835,13 @@ function initializeApp() {
             sidInput.placeholder = 'Enter StarMaker SID (e.g., 62122529777)';
         }
         
-        console.log('✅ SID input listeners added');
+     //   console.log('✅ SID input listeners added');
     }
     
-    console.log('✅ Application initialization complete');
-    console.log('🎯 Primary API:', API_BASE_URL);
-    console.log('🔄 Backup API:', BACKUP_API_URL);
-    console.log('⏱️ Nonce lifetime:', NONCE_LIFETIME / 1000, 'seconds');
+ //   console.log('✅ Application initialization complete');
+ //   console.log('🎯 Primary API:', API_BASE_URL);
+ //   console.log('🔄 Backup API:', BACKUP_API_URL);
+ //   console.log('⏱️ Nonce lifetime:', NONCE_LIFETIME / 1000, 'seconds');
 }
 
 // Event listeners
@@ -856,10 +856,10 @@ if (document.readyState === 'loading') {
 
 // Global error handlers
 window.addEventListener('unhandledrejection', function(event) {
-    console.error('❌ Unhandled promise rejection:', event.reason);
+ //   console.error('❌ Unhandled promise rejection:', event.reason);
     showError('An unexpected error occurred. Please refresh the page and try again.');
 });
 
 window.addEventListener('error', function(event) {
-    console.error('❌ Global error:', event.error);
+//    console.error('❌ Global error:', event.error);
 });
