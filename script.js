@@ -1,11 +1,9 @@
 // Create floating particles
 function createParticles() {
     const container = document.getElementById('particles');
-    if (!container) return; // Safety check
+    if (!container) return;
     
-    // Clear existing particles
     container.innerHTML = '';
-    
     const numParticles = 30;
     
     for (let i = 0; i < numParticles; i++) {
@@ -18,50 +16,90 @@ function createParticles() {
     }
 }
 
-// API configuration - NO FALLBACK NONCES
+// API Configuration
 const API_BASE_URL = 'https://starmaker-proxy.onrender.com/api';
 const BACKUP_API_URL = 'https://starmaker.id.vn/wp-admin/admin-ajax.php';
 
-// Test API connectivity on load
-async function testAPIConnectivity() {
-    try {
-        console.log('Testing API connectivity...');
-        const response = await fetch('https://starmaker-proxy.onrender.com/health');
-        const data = await response.json();
-        console.log('API server status:', data.status);
-        return true;
-    } catch (error) {
-        console.error('API server unreachable:', error);
-        return false;
-    }
-}
+// Global state for nonce management
+let currentNonce = null;
+let nonceTimestamp = null;
+const NONCE_LIFETIME = 5 * 60 * 1000; // 5 minutes
 
-// Enhanced fetch with timeout
-async function fetchWithTimeout(url, options, timeoutMs = 20000) {
+// Enhanced fetch with timeout and retry
+async function fetchWithTimeout(url, options, timeoutMs = 30000) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     
     try {
         const response = await fetch(url, {
             ...options,
-            signal: controller.signal
+            signal: controller.signal,
+            headers: {
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache',
+                ...options.headers
+            }
         });
+        
         clearTimeout(timeoutId);
         return response;
     } catch (error) {
         clearTimeout(timeoutId);
         if (error.name === 'AbortError') {
-            throw new Error('Request timeout');
+            throw new Error('Request timed out after ' + (timeoutMs / 1000) + ' seconds');
         }
         throw error;
     }
 }
 
-// ALWAYS get fresh nonce - NO FALLBACK
+// Test API connectivity
+async function testAPIConnectivity() {
+    try {
+        console.log('🔍 Testing API connectivity...');
+        const response = await fetchWithTimeout(`${API_BASE_URL.replace('/api', '')}/health`, {
+            method: 'GET',
+            headers: {
+                'Accept': 'application/json'
+            }
+        }, 10000);
+        
+        if (response.ok) {
+            const data = await response.json();
+            console.log('✅ API server status:', data.status);
+            return { success: true, data };
+        } else {
+            console.warn('⚠️ API server returned:', response.status, response.statusText);
+            return { success: false, error: `Server returned ${response.status}` };
+        }
+    } catch (error) {
+        console.error('❌ API server unreachable:', error.message);
+        return { success: false, error: error.message };
+    }
+}
+
+// Check if nonce is still valid
+function isNonceValid() {
+    if (!currentNonce || !nonceTimestamp) {
+        return false;
+    }
+    
+    const age = Date.now() - nonceTimestamp;
+    return age < NONCE_LIFETIME;
+}
+
+// Get fresh nonce with improved error handling
 async function getFreshNonce(retries = 3) {
+    // Check if current nonce is still valid
+    if (isNonceValid()) {
+        console.log('🔄 Using cached valid nonce');
+        return currentNonce;
+    }
+    
+    console.log('🔑 Getting fresh nonce...');
+    
     for (let attempt = 1; attempt <= retries; attempt++) {
         try {
-            console.log(`🔑 Getting fresh nonce (attempt ${attempt}/${retries})`);
+            console.log(`📡 Nonce request attempt ${attempt}/${retries}`);
             
             const formData = new URLSearchParams();
             formData.append('action', 'info_id_sm_get_nonce');
@@ -70,49 +108,67 @@ async function getFreshNonce(retries = 3) {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded',
-                    'Accept': 'application/json',
+                    'Accept': 'application/json, text/plain, */*',
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                     'Origin': 'https://starmaker.id.vn',
                     'Referer': 'https://starmaker.id.vn/',
+                    'X-Requested-With': 'XMLHttpRequest'
                 },
                 body: formData
-            }, 15000);
+            }, 20000);
 
             if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                const errorText = await response.text().catch(() => 'No response text');
+                throw new Error(`HTTP ${response.status}: ${response.statusText} - ${errorText}`);
             }
 
-            const data = await response.json();
-            console.log('✅ Nonce response:', data);
+            const responseText = await response.text();
+            let data;
+            
+            try {
+                data = JSON.parse(responseText);
+            } catch (parseError) {
+                console.error('❌ Failed to parse nonce response:', responseText.substring(0, 200));
+                throw new Error('Invalid JSON response from server');
+            }
+
+            console.log('📥 Nonce response:', data);
 
             if (data.success && data.data && data.data.nonce) {
-                console.log(`🎯 Fresh nonce obtained: ${data.data.nonce}`);
-                return data.data.nonce;
+                currentNonce = data.data.nonce;
+                nonceTimestamp = Date.now();
+                console.log(`🎯 Fresh nonce obtained: ${currentNonce}`);
+                return currentNonce;
             } else {
-                throw new Error('Invalid nonce response format');
+                throw new Error(`Invalid nonce response: ${data.message || 'Unknown error'}`);
             }
         } catch (error) {
-            console.warn(`❌ Nonce attempt ${attempt} failed:`, error.message);
+            console.warn(`⚠️ Nonce attempt ${attempt} failed:`, error.message);
             
             if (attempt === retries) {
-                throw new Error(`💥 FAILED to get fresh nonce after ${retries} attempts. NO FALLBACK AVAILABLE.`);
+                // Clear invalid cached nonce
+                currentNonce = null;
+                nonceTimestamp = null;
+                throw new Error(`Failed to get fresh nonce after ${retries} attempts: ${error.message}`);
             }
             
-            // Wait before retry (exponential backoff)
-            await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+            // Exponential backoff
+            const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
+            console.log(`⏳ Waiting ${delay}ms before retry...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
         }
     }
 }
 
-// Primary fetch method - ALWAYS get fresh nonce
+// Primary fetch method with improved error handling
 async function fetchUserData(sid) {
     try {
-        console.log('🚀 Primary method: Fetching user data for SID:', sid);
+        console.log('🚀 Fetching user data for SID:', sid);
         
-        // ALWAYS get fresh nonce first
+        // Get fresh nonce
         const nonce = await getFreshNonce();
         
-        console.log('📤 Making user data request with fresh nonce...');
+        console.log('📤 Making user data request...');
         const formData = new URLSearchParams();
         formData.append('action', 'info_id_sm_fetch');
         formData.append('sid', sid);
@@ -122,8 +178,106 @@ async function fetchUserData(sid) {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
-                'Accept': 'application/json',
+                'Accept': 'application/json, text/plain, */*',
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Origin': 'https://starmaker.id.vn',
+                'Referer': 'https://starmaker.id.vn/',
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: formData
+        }, 25000);
+
+        if (!response.ok) {
+            const errorText = await response.text().catch(() => 'No response text');
+            throw new Error(`HTTP ${response.status}: ${response.statusText} - ${errorText}`);
+        }
+
+        const responseText = await response.text();
+        let data;
+        
+        try {
+            data = JSON.parse(responseText);
+        } catch (parseError) {
+            console.error('❌ Failed to parse user data response:', responseText.substring(0, 200));
+            throw new Error('Invalid JSON response from server');
+        }
+
+        console.log('📥 User data response:', data);
+        
+        // Handle different response formats
+        if (data.success === false) {
+            // If nonce is invalid, clear it and throw specific error
+            if (data.message && data.message.toLowerCase().includes('nonce')) {
+                currentNonce = null;
+                nonceTimestamp = null;
+                throw new Error('Nonce expired - please try again');
+            }
+            throw new Error(data.message || 'API returned error');
+        }
+        
+        return data;
+    } catch (error) {
+        console.warn('⚠️ Primary fetch failed:', error.message);
+        
+        // Clear nonce on certain errors
+        if (error.message.includes('nonce') || error.message.includes('invalid')) {
+            currentNonce = null;
+            nonceTimestamp = null;
+        }
+        
+        throw error;
+    }
+}
+
+// Backup method - Direct API call
+async function fetchUserDataDirect(sid) {
+    try {
+        console.log('🎯 Direct method: Attempting direct API call...');
+        
+        // Step 1: Get nonce directly
+        const nonceFormData = new URLSearchParams();
+        nonceFormData.append('action', 'info_id_sm_get_nonce');
+
+        const nonceResponse = await fetchWithTimeout(BACKUP_API_URL, {
+            method: 'POST',
+            mode: 'cors',
+            credentials: 'omit',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Accept': 'application/json',
+                'Origin': 'https://starmaker.id.vn',
+                'Referer': 'https://starmaker.id.vn/',
+            },
+            body: nonceFormData
+        }, 20000);
+
+        if (!nonceResponse.ok) {
+            throw new Error(`Direct nonce HTTP ${nonceResponse.status}: ${nonceResponse.statusText}`);
+        }
+
+        const nonceData = await nonceResponse.json();
+        
+        if (!nonceData.success || !nonceData.data?.nonce) {
+            throw new Error('Invalid nonce response from direct API');
+        }
+        
+        const nonce = nonceData.data.nonce;
+        console.log(`🎯 Direct nonce obtained: ${nonce}`);
+
+        // Step 2: Fetch user data
+        console.log('📤 Making direct user data request...');
+        const formData = new URLSearchParams();
+        formData.append('action', 'info_id_sm_fetch');
+        formData.append('sid', sid);
+        formData.append('nonce', nonce);
+
+        const response = await fetchWithTimeout(BACKUP_API_URL, {
+            method: 'POST',
+            mode: 'cors',
+            credentials: 'omit',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Accept': 'application/json',
                 'Origin': 'https://starmaker.id.vn',
                 'Referer': 'https://starmaker.id.vn/',
             },
@@ -131,27 +285,25 @@ async function fetchUserData(sid) {
         }, 20000);
 
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            throw new Error(`Direct HTTP ${response.status}: ${response.statusText}`);
         }
 
-        const data = await response.json();
-        console.log('✅ User data response:', data);
-        return data;
+        return await response.json();
     } catch (error) {
-        console.warn('❌ Primary fetch failed:', error.message);
+        console.error('❌ Direct method failed:', error.message);
         throw error;
     }
 }
 
-// Proxy method - ALWAYS get fresh nonce
+// Proxy method using CORS proxy
 async function fetchUserDataWithProxy(sid) {
     try {
-        console.log('🔄 Proxy method: Getting fresh nonce via proxy...');
+        console.log('🔄 Proxy method: Using CORS proxy...');
         
         const PROXY_URL = 'https://api.allorigins.win/get?url=';
         const encodedUrl = encodeURIComponent(BACKUP_API_URL);
         
-        // Step 1: Get fresh nonce via proxy
+        // Step 1: Get nonce via proxy
         const nonceFormData = new URLSearchParams();
         nonceFormData.append('action', 'info_id_sm_get_nonce');
 
@@ -161,7 +313,7 @@ async function fetchUserDataWithProxy(sid) {
                 'Content-Type': 'application/x-www-form-urlencoded',
             },
             body: nonceFormData
-        }, 25000);
+        }, 30000);
 
         if (!nonceResponse.ok) {
             throw new Error(`Proxy nonce HTTP ${nonceResponse.status}: ${nonceResponse.statusText}`);
@@ -174,7 +326,7 @@ async function fetchUserDataWithProxy(sid) {
             const nonceData = JSON.parse(nonceProxyData.contents);
             if (nonceData.success && nonceData.data && nonceData.data.nonce) {
                 nonce = nonceData.data.nonce;
-                console.log(`🎯 Fresh nonce via proxy: ${nonce}`);
+                console.log(`🎯 Proxy nonce obtained: ${nonce}`);
             } else {
                 throw new Error('Invalid nonce response from proxy');
             }
@@ -182,8 +334,8 @@ async function fetchUserDataWithProxy(sid) {
             throw new Error('Invalid proxy nonce response');
         }
 
-        // Step 2: Use fresh nonce to fetch user data
-        console.log('📤 Fetching user data with fresh nonce via proxy...');
+        // Step 2: Fetch user data via proxy
+        console.log('📤 Making proxy user data request...');
         const formData = new URLSearchParams();
         formData.append('action', 'info_id_sm_fetch');
         formData.append('sid', sid);
@@ -195,7 +347,7 @@ async function fetchUserDataWithProxy(sid) {
                 'Content-Type': 'application/x-www-form-urlencoded',
             },
             body: formData
-        }, 25000);
+        }, 30000);
 
         if (!response.ok) {
             throw new Error(`Proxy HTTP ${response.status}: ${response.statusText}`);
@@ -214,68 +366,7 @@ async function fetchUserDataWithProxy(sid) {
     }
 }
 
-// Direct API method - ALWAYS get fresh nonce
-async function fetchUserDataDirect(sid) {
-    try {
-        console.log('🎯 Direct method: Getting fresh nonce directly...');
-        
-        // Step 1: Get fresh nonce directly
-        const nonceFormData = new URLSearchParams();
-        nonceFormData.append('action', 'info_id_sm_get_nonce');
-
-        const nonceResponse = await fetchWithTimeout(BACKUP_API_URL, {
-            method: 'POST',
-            mode: 'cors',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'Accept': 'application/json',
-            },
-            body: nonceFormData
-        }, 15000);
-
-        if (!nonceResponse.ok) {
-            throw new Error(`Direct nonce HTTP ${nonceResponse.status}: ${nonceResponse.statusText}`);
-        }
-
-        const nonceData = await nonceResponse.json();
-        let nonce;
-        
-        if (nonceData.success && nonceData.data && nonceData.data.nonce) {
-            nonce = nonceData.data.nonce;
-            console.log(`🎯 Fresh nonce via direct: ${nonce}`);
-        } else {
-            throw new Error('Invalid nonce response from direct API');
-        }
-
-        // Step 2: Use fresh nonce to fetch user data
-        console.log('📤 Fetching user data with fresh nonce via direct...');
-        const formData = new URLSearchParams();
-        formData.append('action', 'info_id_sm_fetch');
-        formData.append('sid', sid);
-        formData.append('nonce', nonce);
-
-        const response = await fetchWithTimeout(BACKUP_API_URL, {
-            method: 'POST',
-            mode: 'cors',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'Accept': 'application/json',
-            },
-            body: formData
-        }, 15000);
-
-        if (!response.ok) {
-            throw new Error(`Direct HTTP ${response.status}: ${response.statusText}`);
-        }
-
-        return await response.json();
-    } catch (error) {
-        console.error('❌ Direct method failed:', error.message);
-        throw error;
-    }
-}
-
-// Format timestamp to readable date
+// Utility functions
 function formatDate(timestamp) {
     if (!timestamp) return 'Not available';
     try {
@@ -292,19 +383,16 @@ function formatDate(timestamp) {
     }
 }
 
-// Format numbers with commas
 function formatNumber(num) {
     if (num === null || num === undefined) return '0';
     return Number(num).toLocaleString();
 }
 
-// Enhanced safe image URL handler
 function getSafeImageUrl(url, defaultUrl = 'https://via.placeholder.com/150x150/4f46e5/ffffff?text=No+Image') {
     if (!url || url.includes('placeholder') || url === '') {
         return defaultUrl;
     }
     
-    // Handle relative URLs
     if (url.startsWith('//')) {
         return 'https:' + url;
     } else if (url.startsWith('/')) {
@@ -314,7 +402,6 @@ function getSafeImageUrl(url, defaultUrl = 'https://via.placeholder.com/150x150/
     return url;
 }
 
-// HTML escape function for security
 function escapeHtml(text) {
     if (typeof text !== 'string') return text;
     const map = {
@@ -327,7 +414,7 @@ function escapeHtml(text) {
     return text.replace(/[&<>"']/g, function(m) { return map[m]; });
 }
 
-// Helper function to generate verification section
+// Generate verification section
 function generateVerificationSection(user) {
     if (!user.v_info || !user.v_info.title || !Array.isArray(user.v_info.title)) {
         return '';
@@ -352,7 +439,7 @@ function generateVerificationSection(user) {
     `;
 }
 
-// Helper function to generate family section
+// Generate family section
 function generateFamilySection(family) {
     if (!family) return '';
     
@@ -515,11 +602,11 @@ function showError(message) {
             <div class="error-suggestions">
                 <h4>Troubleshooting:</h4>
                 <ul>
-                    <li>Check that the SID is correct and exists</li>
-                    <li>Ensure you have a stable internet connection</li>
-                    <li>Fresh nonce is required - no fallback available</li>
+                    <li>Verify the SID is correct (numbers only, 5-20 digits)</li>
+                    <li>Check your internet connection</li>
+                    <li>The user might not exist or be private</li>
                     <li>Try again in a few moments</li>
-                    <li>If errors persist, the API server might be down</li>
+                    <li>Clear your browser cache if issues persist</li>
                 </ul>
             </div>
         </div>
@@ -528,29 +615,32 @@ function showError(message) {
 
 // Enhanced loading state management
 function showLoading(show) {
-    const loading = document.getElementById('loading');
-    const fetchBtn = document.getElementById('fetchBtn');
-    const sidInput = document.getElementById('sidInput');
+    const elements = {
+        loading: document.getElementById('loading'),
+        fetchBtn: document.getElementById('fetchBtn'),
+        sidInput: document.getElementById('sidInput')
+    };
     
     if (show) {
-        if (loading) loading.classList.remove('hidden');
-        if (fetchBtn) {
-            fetchBtn.disabled = true;
-            fetchBtn.textContent = 'Loading...';
-            fetchBtn.classList.add('loading');
+        elements.loading?.classList.remove('hidden');
+        if (elements.fetchBtn) {
+            elements.fetchBtn.disabled = true;
+            elements.fetchBtn.textContent = 'Fetching...';
+            elements.fetchBtn.classList.add('loading');
         }
-        if (sidInput) {
-            sidInput.disabled = true;
+        if (elements.sidInput) {
+            elements.sidInput.disabled = true;
         }
     } else {
-        if (loading) loading.classList.add('hidden');
-        if (fetchBtn) {
-            fetchBtn.disabled = false;
-            fetchBtn.textContent = 'Fetch Info';
-            fetchBtn.classList.remove('loading');
+        elements.loading?.classList.add('hidden');
+        if (elements.fetchBtn) {
+            elements.fetchBtn.disabled = false;
+            elements.fetchBtn.textContent = 'Fetch Info';
+            elements.fetchBtn.classList.remove('loading');
         }
-        if (sidInput) {
-            sidInput.disabled = false;
+        if (elements.sidInput) {
+            elements.sidInput.disabled = false;
+            elements.sidInput.focus();
         }
     }
 }
@@ -558,7 +648,7 @@ function showLoading(show) {
 // Enhanced SID validation
 function validateSID(sid) {
     if (!sid || sid.trim() === '') {
-        return { valid: false, message: 'Please enter a valid SID' };
+        return { valid: false, message: 'Please enter a StarMaker SID' };
     }
     
     const cleanSID = sid.trim();
@@ -572,13 +662,18 @@ function validateSID(sid) {
     }
     
     if (cleanSID.length > 20) {
-        return { valid: false, message: 'SID seems too long (max 20 digits)' };
+        return { valid: false, message: 'SID is too long (maximum 20 digits)' };
+    }
+    
+    // Check for obviously invalid patterns
+    if (/^0+$/.test(cleanSID)) {
+        return { valid: false, message: 'SID cannot be all zeros' };
     }
     
     return { valid: true };
 }
 
-// Main function with cascade fallback strategy - NO FALLBACK NONCES
+// Main fetch function with cascade fallback
 async function handleFetch() {
     const sidInput = document.getElementById('sidInput');
     const sid = sidInput?.value?.trim();
@@ -587,7 +682,7 @@ async function handleFetch() {
     const resultContainer = document.getElementById('result');
     if (resultContainer) resultContainer.innerHTML = '';
     
-    // Validate SID input
+    // Validate SID
     const validation = validateSID(sid);
     if (!validation.valid) {
         showError(validation.message);
@@ -598,75 +693,115 @@ async function handleFetch() {
     showLoading(true);
     
     const methods = [
-        { name: 'Primary API', func: () => fetchUserData(sid) },
-        { name: 'Proxy Method', func: () => fetchUserDataWithProxy(sid) },
-        { name: 'Direct API', func: () => fetchUserDataDirect(sid) }
+        { 
+            name: 'Primary API Server', 
+            func: () => fetchUserData(sid),
+            priority: 1 
+        },
+        { 
+            name: 'Direct API Call', 
+            func: () => fetchUserDataDirect(sid),
+            priority: 2 
+        },
+        { 
+            name: 'CORS Proxy', 
+            func: () => fetchUserDataWithProxy(sid),
+            priority: 3 
+        }
     ];
+    
+    let lastError = null;
     
     for (let i = 0; i < methods.length; i++) {
         const method = methods[i];
         
         try {
-            console.log(`🚀 Trying ${method.name}...`);
+            console.log(`🚀 Attempting ${method.name} (Priority ${method.priority})...`);
+            const startTime = Date.now();
+            
             const data = await method.func();
+            const duration = Date.now() - startTime;
             
-            console.log(`✅ ${method.name} successful:`, data);
+            console.log(`✅ ${method.name} successful in ${duration}ms:`, data);
             
-            if (data && data.success && data.data) {
+            // Validate response structure
+            if (!data) {
+                throw new Error('Empty response received');
+            }
+            
+            if (data.success === false) {
+                throw new Error(data.message || 'API returned error');
+            }
+            
+            if (data.success && data.data) {
                 displayUserData(data.data);
+                showLoading(false);
+                return;
+            } else if (data.share_user) {
+                // Handle direct response format
+                displayUserData(data);
+                showLoading(false);
                 return;
             } else {
-                const errorMsg = data?.message || data?.error || 'Invalid response format';
-                throw new Error(`${method.name}: ${errorMsg}`);
+                throw new Error('Invalid response format - missing user data');
             }
-        } catch (error) {
-            console.warn(`❌ ${method.name} failed:`, error.message);
             
-            if (i === methods.length - 1) {
-                // All methods failed
-                let errorMessage = '💥 All fetch methods failed. ';
-                
-                if (error.message.includes('fresh nonce')) {
-                    errorMessage += 'Unable to obtain fresh security token. ';
-                } else if (error.message.includes('timeout')) {
-                    errorMessage += 'The request timed out. ';
-                } else if (error.message.includes('CORS')) {
-                    errorMessage += 'CORS policy blocked the request. ';
-                } else if (error.message.includes('network') || error.message.includes('fetch')) {
-                    errorMessage += 'Network error. Check your connection. ';
-                } else if (error.message.includes('not found') || error.message.includes('404')) {
-                    errorMessage += 'User not found. Check the SID. ';
-                } else {
-                    errorMessage += 'Server error occurred. ';
-                }
-                
-                errorMessage += 'NO FALLBACK NONCES AVAILABLE.';
-                showError(errorMessage);
+        } catch (error) {
+            lastError = error;
+            console.warn(`⚠️ ${method.name} failed:`, error.message);
+            
+            // If it's a nonce error and we have more methods, clear the nonce
+            if (error.message.toLowerCase().includes('nonce') && i < methods.length - 1) {
+                currentNonce = null;
+                nonceTimestamp = null;
+                console.log('🔄 Cleared invalid nonce, will retry with fresh nonce');
             }
         }
     }
     
+    // All methods failed
     showLoading(false);
+    let errorMessage = '💥 Unable to fetch user data. ';
+    
+    if (lastError) {
+        if (lastError.message.includes('timeout')) {
+            errorMessage += 'Request timed out - the server may be overloaded.';
+        } else if (lastError.message.includes('nonce')) {
+            errorMessage += 'Security token issues - please try again.';
+        } else if (lastError.message.includes('CORS')) {
+            errorMessage += 'Browser security restrictions - try refreshing the page.';
+        } else if (lastError.message.includes('not found') || lastError.message.includes('404')) {
+            errorMessage += 'User not found - check if the SID is correct.';
+        } else if (lastError.message.includes('network') || lastError.message.includes('fetch')) {
+            errorMessage += 'Network connectivity issues - check your internet connection.';
+        } else {
+            errorMessage += 'Server error - please try again later.';
+        }
+    }
+    
+    showError(errorMessage);
 }
 
-// Enhanced initialization
+// Application initialization
 function initializeApp() {
-    console.log('🚀 Initializing StarMaker Info Fetcher (NO FALLBACK VERSION)...');
+    console.log('🚀 Initializing StarMaker Info Fetcher v2.1...');
     
-    // Test API connectivity first
-    testAPIConnectivity().then(connected => {
-        if (!connected) {
-            showError('⚠️ Cannot connect to proxy server. Please check if the server is running.');
+    // Test API connectivity
+    testAPIConnectivity().then(result => {
+        if (result.success) {
+            console.log('✅ API server is reachable:', result.data?.message);
         } else {
-            console.log('✅ API server is reachable');
+            console.warn('⚠️ API server issue:', result.error);
+            showError('⚠️ Proxy server connectivity issues detected. Some features may not work properly.');
         }
     });
     
-    // Create particles if container exists
+    // Create particles
     try {
         createParticles();
+        console.log('✅ Particles initialized');
     } catch (error) {
-        console.warn('Failed to create particles:', error);
+        console.warn('⚠️ Failed to create particles:', error);
     }
     
     // Set up event listeners
@@ -679,7 +814,7 @@ function initializeApp() {
     }
     
     if (sidInput) {
-        // Enter key event
+        // Enter key support
         sidInput.addEventListener('keypress', function(e) {
             if (e.key === 'Enter') {
                 e.preventDefault();
@@ -687,50 +822,44 @@ function initializeApp() {
             }
         });
         
-        // Input validation - only allow numbers
+        // Input validation - numbers only
         sidInput.addEventListener('input', function(e) {
-            e.target.value = e.target.value.replace(/[^0-9]/g, '');
+            const value = e.target.value.replace(/[^0-9]/g, '');
+            if (e.target.value !== value) {
+                e.target.value = value;
+            }
         });
         
-        // Add placeholder if not already set
+        // Enhanced placeholder
         if (!sidInput.placeholder) {
-            sidInput.placeholder = 'Enter StarMaker SID (numbers only)';
+            sidInput.placeholder = 'Enter StarMaker SID (e.g., 62122529777)';
         }
         
         console.log('✅ SID input listeners added');
     }
     
-    console.log('✅ App initialization complete (NO FALLBACK MODE)');
-    console.log('🎯 API endpoint:', API_BASE_URL);
-    console.log('⚠️ WARNING: NO FALLBACK NONCES - Fresh nonces required!');
+    console.log('✅ Application initialization complete');
+    console.log('🎯 Primary API:', API_BASE_URL);
+    console.log('🔄 Backup API:', BACKUP_API_URL);
+    console.log('⏱️ Nonce lifetime:', NONCE_LIFETIME / 1000, 'seconds');
 }
 
-// Event listeners with better error handling
-document.addEventListener('DOMContentLoaded', function() {
-    try {
-        initializeApp();
-    } catch (error) {
-        console.error('Initialization error:', error);
-    }
-});
+// Event listeners
+document.addEventListener('DOMContentLoaded', initializeApp);
 
-// Also initialize if DOM is already loaded
+// Handle already loaded DOM
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initializeApp);
 } else {
-    try {
-        initializeApp();
-    } catch (error) {
-        console.error('Initialization error:', error);
-    }
+    initializeApp();
 }
 
-// Global error handler
+// Global error handlers
 window.addEventListener('unhandledrejection', function(event) {
-    console.error('Unhandled promise rejection:', event.reason);
-    showError('An unexpected error occurred. Please try again.');
+    console.error('❌ Unhandled promise rejection:', event.reason);
+    showError('An unexpected error occurred. Please refresh the page and try again.');
 });
 
 window.addEventListener('error', function(event) {
-    console.error('Global error:', event.error);
+    console.error('❌ Global error:', event.error);
 });
