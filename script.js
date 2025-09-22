@@ -28,7 +28,18 @@ async function getFreshNonce() {
         const response = await fetch(API_BASE_URL, {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/x-www-form-urlencoded'
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Accept': '/',
+                'Sec-Ch-Ua-Platform': '"Windows"',
+                'X-Requested-With': 'XMLHttpRequest',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
+                'Origin': 'https://starmaker.id.vn',
+                'Sec-Fetch-Site': 'same-origin',
+                'Sec-Fetch-Mode': 'cors',
+                'Sec-Fetch-Dest': 'empty',
+                'Referer': 'https://starmaker.id.vn/',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Accept-Language': 'en-US,en;q=0.9,hi;q=0.8',
             },
             body: formData
         });
@@ -40,10 +51,10 @@ async function getFreshNonce() {
         const data = await response.json();
         console.log('Nonce response:', data);
 
-        return data.success ? data.data.nonce : null; // fallback nonce
+        return data.success ? data.data.nonce : '17684aaf53'; // fallback nonce
     } catch (error) {
         console.warn('Failed to get fresh nonce:', error);
-        return null; // fallback nonce
+        return '17684aaf53'; // fallback nonce
     }
 }
 
@@ -51,8 +62,6 @@ async function getFreshNonce() {
 async function fetchUserData(sid) {
     try {
         const nonce = await getFreshNonce();
-        if (!nonce) throw new Error('No nonce');
-        
         console.log('Using nonce:', nonce);
 
         const formData = new URLSearchParams();
@@ -63,7 +72,8 @@ async function fetchUserData(sid) {
         const response = await fetch(API_BASE_URL, {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/x-www-form-urlencoded'
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Accept': 'application/json',
             },
             body: formData
         });
@@ -78,7 +88,38 @@ async function fetchUserData(sid) {
         return data;
     } catch (error) {
         console.warn('Direct API call failed, trying proxy method:', error);
-        throw error; // Fallback to proxy method
+        return await fetchUserDataWithProxy(sid); // Fallback to proxy method
+    }
+}
+
+// Alternative fetch method using CORS proxy if direct API fails
+async function fetchUserDataWithProxy(sid) {
+    try {
+        const PROXY_URL = 'https://api.allorigins.win/get?url=';
+        const nonce = '17684aaf53'; // Use default nonce for proxy method
+
+        const formData = new URLSearchParams();
+        formData.append('action', 'info_id_sm_fetch');
+        formData.append('sid', sid);
+        formData.append('nonce', nonce);
+
+        const response = await fetch(PROXY_URL + API_BASE_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Accept': 'application/json',
+            },
+            body: formData
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        return await response.json();
+    } catch (error) {
+        console.error('Error with proxy method:', error);
+        throw error;
     }
 }
 
@@ -302,7 +343,7 @@ async function handleFetch() {
     // Clear previous results
     const resultContainer = document.getElementById('result');
     if (resultContainer) resultContainer.innerHTML = '';
-
+    
     // Validate SID input
     const validation = validateSID(sid);
     if (!validation.valid) {
@@ -314,7 +355,16 @@ async function handleFetch() {
     showLoading(true);
     
     try {
-        const data = await fetchUserData(sid); // Proxy only
+        // Try direct API call first
+        let data;
+        try {
+            data = await fetchUserData(sid);
+        } catch (directError) {
+            console.warn('Direct API call failed, trying proxy method:', directError);
+            // Fallback to proxy method
+            data = await fetchUserDataWithProxy(sid);
+        }
+        
         console.log('Final API Response:', data);
         
         if (data.success && data.data) {
@@ -324,19 +374,21 @@ async function handleFetch() {
             showError(`API Error: ${errorMsg}`);
         }
     } catch (error) {
-  console.error('Error fetching data:', error);
-  let errorMessage = 'Error fetching data. ';
-  if (error.message.includes('Status: 502')) {
-    errorMessage += 'Proxy issue - check console for details.';
-  } else if (error.message.includes('Failed to fetch')) {
-    errorMessage += 'Network error.';
-  } else {
-    errorMessage += 'Try again.';
-  }
-  showError(errorMessage);
-} finally {
-  showLoading(false);
-}
+        console.error('Error fetching data:', error);
+        let errorMessage = 'Error fetching data. ';
+        
+        if (error.message.includes('CORS')) {
+            errorMessage += 'CORS policy is blocking the request. You may need to run this from a server.';
+        } else if (error.message.includes('Failed to fetch')) {
+            errorMessage += 'Network error. Please check your internet connection.';
+        } else {
+            errorMessage += 'Please try again later.';
+        }
+        
+        showError(errorMessage);
+    } finally {
+        showLoading(false);
+    }
 }
 
 // Initialize the application
