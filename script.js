@@ -168,15 +168,46 @@ async function fetchUserDataWithProxy(sid) {
     }
 }
 
-// Direct API call as last resort
+// Direct API call as last resort - ALWAYS get fresh nonce
 async function fetchUserDataDirect(sid) {
     try {
-        console.log('Attempting direct API call');
+        console.log('Attempting direct API call - getting fresh nonce...');
         
+        // Step 1: Get fresh nonce directly
+        console.log('Getting fresh nonce via direct API...');
+        const nonceFormData = new URLSearchParams();
+        nonceFormData.append('action', 'info_id_sm_get_nonce');
+
+        const nonceResponse = await fetchWithTimeout(BACKUP_API_URL, {
+            method: 'POST',
+            mode: 'cors',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Accept': 'application/json',
+            },
+            body: nonceFormData
+        }, 15000);
+
+        if (!nonceResponse.ok) {
+            throw new Error(`Direct nonce HTTP ${nonceResponse.status}: ${nonceResponse.statusText}`);
+        }
+
+        const nonceData = await nonceResponse.json();
+        let nonce;
+        
+        if (nonceData.success && nonceData.data && nonceData.data.nonce) {
+            nonce = nonceData.data.nonce;
+            console.log('Fresh nonce obtained via direct API:', nonce);
+        } else {
+            throw new Error('Invalid nonce response format from direct API');
+        }
+
+        // Step 2: Use fresh nonce to fetch user data
+        console.log('Fetching user data with fresh nonce via direct API...');
         const formData = new URLSearchParams();
         formData.append('action', 'info_id_sm_fetch');
         formData.append('sid', sid);
-        formData.append('nonce', '17684aaf53');
+        formData.append('nonce', nonce);
 
         const response = await fetchWithTimeout(BACKUP_API_URL, {
             method: 'POST',
