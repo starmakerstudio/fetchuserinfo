@@ -17,7 +17,7 @@ function createParticles() {
 }
 
 // API Configuration
-const API_BASE_URL = 'https://starmaker-proxy.onrender.com/api';
+const API_BASE_URL = 'https://starmaker-server.onrender.com/api';
 const BACKUP_API_URL = 'https://starmaker.id.vn/wp-admin/admin-ajax.php';
 
 // Global state for nonce management
